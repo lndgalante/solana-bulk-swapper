@@ -1,0 +1,18 @@
+{
+  "name": "solana-bulk-swapper",
+  "type": "module",
+  "scripts": {
+    "type:check": "tsc --project tsconfig.json",
+    "clean:install": "bun pm cache rm && bunx rimraf bun.lockb node_modules && bun install"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "devDependencies": {
+    "@antfu/eslint-config": "^2.4.6",
+    "@total-typescript/ts-reset": "^0.5.1",
+    "bun-types": "latest",
+    "eslint": "^8.56.0",
+    "typescript": "^5.3.3"
+  }
+}
