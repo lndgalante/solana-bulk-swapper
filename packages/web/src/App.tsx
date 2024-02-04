@@ -241,7 +241,7 @@ export default function App() {
       if (!data || !data.data)
         return
 
-      toast.loading('Swapping your tokens')
+      const id = toast.loading('Swapping your tokens')
 
       await Promise.all(data.data.map(async (transaction: string) => {
         const transactionBuffer = Buffer.from(transaction, 'base64')
@@ -254,6 +254,7 @@ export default function App() {
         return signature
       }))
 
+      toast.dismiss(id)
       toast.success('All tokens successfully swapped')
 
       setSelectedKeys(new Set(['']))
