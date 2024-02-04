@@ -11,6 +11,9 @@ export function CustomRadioGroup(props: RadioGroupProps) {
         wrapper: cn(
           'flex-row',
         ),
+        label: cn(
+          ' text-foreground-700',
+        ),
       }}
     >
       {children}
