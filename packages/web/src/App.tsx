@@ -1,12 +1,22 @@
+// eslint-disable-next-line unicorn/prefer-node-protocol
+import { Buffer } from 'buffer'
 import { useState } from 'react'
 import { useWallet } from '@solana/wallet-adapter-react'
-import { Avatar, Button, Input, Listbox, ListboxItem, Navbar, NavbarBrand, NavbarContent, NavbarItem, Slider, Spinner, select, useDisclosure } from '@nextui-org/react'
+import { Avatar, Button, Input, Listbox, ListboxItem, Navbar, NavbarBrand, NavbarContent, NavbarItem, Slider, Spinner, useDisclosure } from '@nextui-org/react'
 import BigNumber from 'bignumber.js'
+import { toast } from 'sonner'
 
 // components
 import { useQuery } from '@tanstack/react-query'
+import { edenTreaty } from '@elysiajs/eden'
+import { Connection, VersionedTransaction } from '@solana/web3.js'
+import type { App } from '../../api/src/index'
 import { CustomRadio, CustomRadioGroup } from './components/Radio'
 import WalletModal from './components/WalletModal'
+
+const client = edenTreaty<App>('http://localhost:3000')
+
+const connection = new Connection('https://mainnet.helius-rpc.com/?api-key=4eb2dbba-8de6-4d60-8cf3-61d77f84f518', 'confirmed')
 
 const TOKENS_LIST = [
   {
@@ -15,6 +25,9 @@ const TOKENS_LIST = [
     logoURI: 'https://img.fotofolio.xyz/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsolana-labs%2Ftoken-list%2Fmain%2Fassets%2Fmainnet%2FSo11111111111111111111111111111111111111112%2Flogo.png',
     symbol: 'SOL',
     name: 'Solana',
+    getFormattedOutput(outputAmount: string) {
+      return new BigNumber(outputAmount).dividedBy(new BigNumber(10).pow(9))
+    },
   },
   {
     address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
@@ -22,6 +35,9 @@ const TOKENS_LIST = [
     logoURI: 'https://img.fotofolio.xyz/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsolana-labs%2Ftoken-list%2Fmain%2Fassets%2Fmainnet%2FEPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v%2Flogo.png',
     symbol: 'USDC',
     name: 'USD Coin',
+    getFormattedOutput(outputAmount: string) {
+      return new BigNumber(outputAmount).dividedBy(new BigNumber(10).pow(6))
+    },
   },
   {
     address: 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263',
@@ -29,11 +45,11 @@ const TOKENS_LIST = [
     logoURI: 'https://arweave.net/hQiPZOsRZXGXBJd_82PhVdlM_hACsT_q6wqwf5cSY7I',
     symbol: 'Bonk',
     name: 'Bonk',
+    getFormattedOutput(outputAmount: string) {
+      return new BigNumber(outputAmount).dividedBy(new BigNumber(10).pow(6))
+    },
   },
 ]
-
-const tokenListAddresses = TOKENS_LIST.map(token => token.address)
-
 export function getTruncatedText(text: string, length: number, separator: string): string {
   return `${text.substring(0, length)}${separator}${text.substring(text.length - length)}`
 }
@@ -58,7 +74,6 @@ async function getTokensMetadata(tokenListAddresses: string[]) {
     }),
   })
   const { result } = await response.json()
-  console.log('Assets: ', result)
 
   return result
 }
@@ -91,7 +106,7 @@ async function getAssetsByOwner(ownerAddress: string) {
   }).map((item: any) => {
     const shortAddress = getShortAddress(item.id)
     const fiatValue = getFiatTokenValue({ balance: item.token_info.balance, decimals: item.token_info.decimals, price_info: item.token_info.price_info }).toFixed(2)
-    const balanceFormatted = formatBalance({ balance: item.token_info.balance, decimals: item.token_info.decimals })
+    const balanceFormatted = formatBalance({ balance: item.token_info.balance, decimals: item.token_info.decimals }).toFixed(2)
 
     return {
       ...item,
@@ -135,6 +150,12 @@ function getFiatTokenValue({
   return fiatValue
 }
 
+export type TokensToSwap = Record<string, {
+  mint: string
+  value: number
+  tokenInfo: TokenInfo
+}>
+
 function formatBalance({ balance, decimals }: {
   balance: TokenInfo['balance']
   decimals: TokenInfo['decimals']
@@ -146,7 +167,7 @@ function formatBalance({ balance, decimals }: {
   const adjustedBalance = tokenBalance.dividedBy(tokenDecimals)
 
   // Formatting the balance with commas as thousand separators
-  return adjustedBalance.toFormat(2) // 'toFormat(2)' formats the number with two decimal places
+  return adjustedBalance.toNumber() // 'toFormat(2)' formats the number with two decimal places
 }
 
 export default function App() {
@@ -156,21 +177,35 @@ export default function App() {
 
   // data to send to API
   const [tokenToSwapAddress, setTokenToSwapAddress] = useState<string | undefined>(undefined)
-  const [tokensToSwap, setTokensToSwap] = useState<Record<string, {
-    value: number
-    tokenInfo: TokenInfo
-  }>>({})
+  const [tokensToSwap, setTokensToSwap] = useState<TokensToSwap>({})
 
   // next-ui hooks
   const { isOpen, onOpen, onOpenChange } = useDisclosure()
 
   // solana hooks
-  const { publicKey, disconnect } = useWallet()
+  const { publicKey, disconnect, signTransaction, sendTransaction } = useWallet()
   const publicKeyString = publicKey?.toBase58() ?? ''
+
+  // helpers
+  const totalTokensToSwap = Object.keys(tokensToSwap).length
+  const hasTokensToSwap = totalTokensToSwap > 0
+  const tokenToSwap = TOKENS_LIST.find(token => token.address === tokenToSwapAddress)
+
+  async function getQuotesForTokens() {
+    if (!tokenToSwap)
+      return null
+
+    const tokens = Object.values(tokensToSwap)
+    const data = await client.quotes.post({ inputMints: tokens, outputMint: tokenToSwap })
+
+    return data
+  }
 
   // query hooks
   // TODO: Handle error state
-  const { data, isLoading, error } = useQuery({ queryKey: ['assets'], queryFn: () => getAssetsByOwner(publicKeyString), enabled: publicKeyString !== '' })
+  const { data: walletAssets, isLoading: isLoadingWalletAssets, error: walletAssetsError } = useQuery({ queryKey: ['assets'], queryFn: () => getAssetsByOwner(publicKeyString), enabled: publicKeyString !== '' })
+  const { data: quotes, isLoading: isLoadingQuotes, error: quotesError } = useQuery({ queryKey: ['quotes', tokensToSwap], queryFn: () => getQuotesForTokens(), enabled: Boolean(hasTokensToSwap && tokenToSwap) })
+
   // const { data: tokensFromData } = useQuery({ queryKey: ['tokens-from'], queryFn: () => getTokensMetadata(tokenListAddresses) })
 
   // handlers
@@ -194,20 +229,63 @@ export default function App() {
     setSelectedKeys(set)
   }
 
+  async function handleSwapTokens() {
+    try {
+      if (!quotes || !signTransaction)
+        return null
+
+      const data = await client.swap.post({ quotes: quotes.data, userPublicKey: publicKeyString }, {
+        enabled: Boolean(quotes),
+      })
+
+      if (!data || !data.data)
+        return
+
+      toast.loading('Swapping your tokens')
+
+      await Promise.all(data.data.map(async (transaction: string) => {
+        const transactionBuffer = Buffer.from(transaction, 'base64')
+        const versionedTransaction = VersionedTransaction.deserialize(transactionBuffer)
+
+        // Sign the transaction
+        const signature = await sendTransaction(versionedTransaction, connection)
+
+        await connection.confirmTransaction(signature, 'confirmed')
+        return signature
+      }))
+
+      toast.success('All tokens successfully swapped')
+
+      setSelectedKeys(new Set(['']))
+      setTokensToSwap({})
+    }
+    catch (error) {
+      // toast.error(`We couldn't swap the tokens at the moment, please try again later.`)
+      console.log('\n ~ handleSwapTokens ~ error:', error)
+    }
+  }
+
   // constants
   const tokenQueryLowerCase = tokenQuery.toLowerCase()
-  const tokenList = Array.isArray(data) ? data.filter((token: any) => token?.content?.metadata?.symbol?.toLowerCase().includes(tokenQueryLowerCase) || token?.content?.metadata?.name?.includes(tokenQueryLowerCase)) : []
+  const tokenList = Array.isArray(walletAssets) ? walletAssets.filter((token: any) => token?.content?.metadata?.symbol?.toLowerCase().includes(tokenQueryLowerCase) || token?.content?.metadata?.name?.includes(tokenQueryLowerCase)) : []
 
   const allTokensToSwapFiatValue = Object.values(tokensToSwap).reduce((acc, token) => {
     const fiatValue = getFiatTokenValue({ balance: token.value, decimals: token.tokenInfo.decimals, price_info: token.tokenInfo.price_info })
     return acc.plus(fiatValue)
   }, new BigNumber(0))
 
-  const totalTokensToSwap = Object.keys(tokensToSwap).length
+  const totalTokensToSwapFormatted = quotes
+    ? quotes.data?.reduce((acc, quote) => {
+      const { outAmount, outputMint } = quote
 
-  const hasTokensToSwap = totalTokensToSwap > 0
+      const tokenToSwap = TOKENS_LIST.find(token => token.address === outputMint)
 
-  const tokenToSwap = TOKENS_LIST.find(token => token.address === tokenToSwapAddress)
+      if (!tokenToSwap)
+        return acc
+
+      return acc + tokenToSwap.getFormattedOutput(outAmount).toNumber()
+    }, 0).toFixed(4)
+    : null
 
   return (
     <>
@@ -271,7 +349,7 @@ export default function App() {
                 )
               : null}
 
-            {isLoading
+            {isLoadingWalletAssets
               ? (
                 <div className="flex flex-1 justify-center items-center">
                   <Spinner label="Loading wallet tokens..." color="primary" labelColor="foreground" />
@@ -279,7 +357,7 @@ export default function App() {
                 )
               : null}
 
-            {data && data.length > 0
+            {tokenList && tokenList.length > 0
               ? (
                 <div>
                   <Input
@@ -350,6 +428,7 @@ export default function App() {
                                 setTokensToSwap((prevTokensToSwap) => {
                                   const newTokensToSwap = { ...prevTokensToSwap }
                                   newTokensToSwap[token.id] = {
+                                    mint: token.id,
                                     value: value as number,
                                     tokenInfo: token.token_info,
                                   }
@@ -360,7 +439,7 @@ export default function App() {
                                 if (!tokensToSwap[token.id])
                                   return ''
 
-                                return `${formatBalance({ balance: (tokens as number), decimals: token?.token_info?.decimals })} ($${getFiatTokenValue({ balance: (tokens as number), decimals: token?.token_info?.decimals, price_info: token?.token_info?.price_info }).toFixed(2)})`
+                                return `${formatBalance({ balance: (tokens as number), decimals: token?.token_info?.decimals }).toFixed(2)} ($${getFiatTokenValue({ balance: (tokens as number), decimals: token?.token_info?.decimals, price_info: token?.token_info?.price_info }).toFixed(2)})`
                               }}
                               maxValue={token?.token_info?.balance}
                               className={`max-w-md text-center ${selectedKeys.has(token.id) ? 'visible' : 'hidden'}`}
@@ -378,24 +457,18 @@ export default function App() {
           </div>
           <div className={`flex just transition-all mt-2 ${hasTokensToSwap && tokenToSwap ? 'opacity-100' : 'opacity-0'}`}>
 
-            <Button color="primary" size="md" variant="shadow" fullWidth>
-              Swap
-              {' '}
-              {totalTokensToSwap}
-              {' '}
-              tokens for $
-              {allTokensToSwapFiatValue.toFixed(2)}
-              {' '}
-              to
-              {' '}
-              {tokenToSwap?.symbol}
+            <Button color="primary" size="md" variant="shadow" fullWidth isLoading={isLoadingQuotes} isDisabled={!quotes} onClick={handleSwapTokens}>
+              {/* {isLoadingQuotes ? 'Loading quotes...' : `Swap` } */}
+              {isLoadingQuotes ? 'Loading quotes...' : `Swap ${totalTokensToSwap} tokens for ${totalTokensToSwapFormatted} ${tokenToSwap?.symbol} ($${allTokensToSwapFiatValue.toFixed(2)})` }
             </Button>
           </div>
         </div>
 
         {/* Modal Wallet */}
         <WalletModal isOpen={isOpen} onOpenChange={onOpenChange} />
+
       </main>
+
     </>
   )
 }

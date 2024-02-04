@@ -3,6 +3,8 @@ import ReactDOM from 'react-dom/client'
 import { NextUIProvider } from '@nextui-org/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
+import { Toaster } from 'sonner'
+
 // styles
 import './index.css'
 
@@ -16,13 +18,14 @@ import { Wallet } from './providers/Wallet'
 const queryClient = new QueryClient()
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>
+  <div>
     <QueryClientProvider client={queryClient}>
       <NextUIProvider>
         <Wallet>
           <App />
+          <Toaster />
         </Wallet>
       </NextUIProvider>
     </QueryClientProvider>
-  </React.StrictMode>,
+  </div>,
 )

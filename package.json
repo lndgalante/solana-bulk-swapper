@@ -16,5 +16,8 @@
     "bun-types": "latest",
     "eslint": "^8.56.0",
     "typescript": "^5.3.3"
+  },
+  "dependencies": {
+    "react-hot-toast": "^2.4.1"
   }
 }
